@@ -171,7 +171,8 @@ class ComponentRenderer {
     // 创建粒子效果
     createParticles() {
         const container = document.querySelector('.particles');
-        if (!container) return;
+        if (!container || container.dataset.initialized) return;
+        container.dataset.initialized = '1';
 
         const colors = ['#a855f7', '#ec4899', '#06b6d4', '#10b981'];
         
@@ -193,7 +194,8 @@ class ComponentRenderer {
         const toggle = document.getElementById('sidebarToggle');
         const close = document.getElementById('sidebarClose');
         const body = document.getElementById('sidebarBody');
-        if (!sidebar || !toggle || !close || !body) return;
+        if (!sidebar || !toggle || !close || !body || sidebar.dataset.initialized) return;
+        sidebar.dataset.initialized = '1';
 
         toggle.addEventListener('click', () => {
             sidebar.classList.add('open');
