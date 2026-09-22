@@ -8,23 +8,24 @@ class App {
     }
 
     init() {
-        if (this.initialized) return;
-        this.initialized = true;
+        if (!this.initialized) {
+            this.initialized = true;
 
-        // 初始化组件
-        window.componentRenderer.init();
+            // 初始化组件
+            window.componentRenderer.init();
 
-        // 初始化图表
+            // 监听窗口大小变化
+            window.addEventListener('resize', this.handleResize.bind(this));
+
+            // 监听滚动
+            window.addEventListener('scroll', this.handleScroll.bind(this));
+
+            console.log('🚀 Dashboard initialized successfully');
+        }
+
+        // 初始化图表（幂等：重复进入时会先清理旧实例再重建，保证正确重绘）
         window.chartManager.initFunnelChart('funnelChart');
         window.chartManager.initRadarChart('radarChart');
-
-        // 监听窗口大小变化
-        window.addEventListener('resize', this.handleResize.bind(this));
-
-        // 监听滚动
-        window.addEventListener('scroll', this.handleScroll.bind(this));
-
-        console.log('🚀 Dashboard initialized successfully');
     }
 
     handleResize() {

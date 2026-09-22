@@ -5,12 +5,97 @@
 class ChartManager {
     constructor() {
         this.charts = {};
+        this.observers = {};
     }
 
-    // 初始化漏斗图
+    /* ---------- 数据校验：分群无样本时返回空，避免图表显示为 0 ---------- */
+
+    getValidFunnelData() {
+        const source = (typeof funnelData !== 'undefined' && Array.isArray(funnelData)) ? funnelData : [];
+        return source.filter(item => item && typeof item.value === 'number' && isFinite(item.value));
+    }
+
+    getValidRadarData() {
+        const source = (typeof radarData !== 'undefined' && radarData) ? radarData : {};
+        const indicators = Array.isArray(source.indicators) ? source.indicators : [];
+        const series = Array.isArray(source.series) ? source.series : [];
+
+        const validSeries = series
+            .filter(s => s && Array.isArray(s.value) && s.value.some(v => typeof v === 'number' && isFinite(v)))
+            .map(s => ({
+                ...s,
+                // 与指标维度对齐，缺失值用 null（留空）而不是 0
+                value: indicators.map((_, i) => {
+                    const v = s.value[i];
+                    return (typeof v === 'number' && isFinite(v)) ? v : null;
+                })
+            }));
+
+        return { indicators, series: validSeries };
+    }
+
+    /* ---------- 实例与容器清理：防止重复初始化残留旧实例 ---------- */
+
+    disposeChart(key) {
+        const chart = this.charts[key];
+        if (chart) {
+            if (typeof chart.isDisposed !== 'function' || !chart.isDisposed()) {
+                chart.dispose();
+            }
+            delete this.charts[key];
+        }
+        if (this.observers[key]) {
+            this.observers[key].disconnect();
+            delete this.observers[key];
+        }
+    }
+
+    resetContainer(container) {
+        // 容器上可能残留未登记在册的旧实例，先销毁再清空占位内容
+        const existing = echarts.getInstanceByDom(container);
+        if (existing) {
+            existing.dispose();
+        }
+        container.innerHTML = '';
+    }
+
+    /* ---------- 数据缺失占位 ---------- */
+
+    showEmptyState(container, message) {
+        container.innerHTML = `
+            <div class="chart-empty-state">
+                <span class="chart-empty-icon">📭</span>
+                <span class="chart-empty-text">${message}</span>
+            </div>
+        `;
+        return null;
+    }
+
+    /* ---------- 容器尺寸监听：窗口缩放/断点切换时自动重绘 ---------- */
+
+    observeContainer(key, container, chart) {
+        if (typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(() => {
+            if (typeof chart.isDisposed === 'function' && chart.isDisposed()) return;
+            chart.resize();
+        });
+        observer.observe(container);
+        this.observers[key] = observer;
+    }
+
+    /* ---------- 漏斗图 ---------- */
+
     initFunnelChart(containerId) {
         const container = document.getElementById(containerId);
         if (!container) return;
+
+        this.disposeChart('funnel');
+        this.resetContainer(container);
+
+        const data = this.getValidFunnelData();
+        if (!data.length) {
+            return this.showEmptyState(container, '该分群暂无漏斗样本数据');
+        }
 
         const chart = echarts.init(container);
         this.charts.funnel = chart;
@@ -62,7 +147,7 @@ class ChartManager {
                         shadowColor: 'rgba(168, 85, 247, 0.5)'
                     }
                 },
-                data: funnelData.map(item => ({
+                data: data.map(item => ({
                     value: item.value,
                     name: item.name,
                     itemStyle: { color: item.color }
@@ -71,19 +156,30 @@ class ChartManager {
         };
 
         chart.setOption(option);
-        
+
         // 点击事件
         chart.on('click', (params) => {
             window.toast.info('漏斗分析', `${params.name}: 转化率 ${params.value}%`);
         });
 
+        this.observeContainer('funnel', container, chart);
+
         return chart;
     }
 
-    // 初始化雷达图
+    /* ---------- 雷达图 ---------- */
+
     initRadarChart(containerId) {
         const container = document.getElementById(containerId);
         if (!container) return;
+
+        this.disposeChart('radar');
+        this.resetContainer(container);
+
+        const { indicators, series } = this.getValidRadarData();
+        if (!indicators.length || !series.length) {
+            return this.showEmptyState(container, '该分群暂无雷达样本数据');
+        }
 
         const chart = echarts.init(container);
         this.charts.radar = chart;
@@ -91,7 +187,7 @@ class ChartManager {
         const option = {
             backgroundColor: 'transparent',
             legend: {
-                data: radarData.series.map(s => s.name),
+                data: series.map(s => s.name),
                 bottom: 0,
                 textStyle: { color: '#94a3b8', fontSize: 12 },
                 itemWidth: 16,
@@ -107,10 +203,10 @@ class ChartManager {
                 extraCssText: 'backdrop-filter: blur(10px); border-radius: 8px;'
             },
             radar: {
-                indicator: radarData.indicators,
+                indicator: indicators,
                 shape: 'polygon',
                 splitNumber: 4,
-                center: ['50%', '48%'],
+                center: ['50%', '45%'],
                 radius: '65%',
                 axisName: {
                     color: '#94a3b8',
@@ -136,7 +232,7 @@ class ChartManager {
             },
             series: [{
                 type: 'radar',
-                data: radarData.series.map(s => ({
+                data: series.map(s => ({
                     value: s.value,
                     name: s.name,
                     symbol: 'circle',
@@ -159,33 +255,42 @@ class ChartManager {
 
         chart.setOption(option);
 
-        // 点击事件
+        // 点击事件：只响应数据系列，名称与数值按指标维度一一对应
         chart.on('click', (params) => {
-            if (params.name) {
-                window.toast.info('能力对比', `${params.seriesName}: ${params.name}`);
-            }
+            if (params.componentType !== 'series' || !params.name) return;
+            const values = Array.isArray(params.value) ? params.value : [];
+            const detail = indicators
+                .map((ind, i) => `${ind.name} ${values[i] != null ? values[i] : '缺失'}`)
+                .join('，');
+            window.toast.info('能力对比', `${params.name}：${detail}`);
         });
+
+        this.observeContainer('radar', container, chart);
 
         return chart;
     }
 
-    // 响应式调整
+    /* ---------- 响应式调整 ---------- */
+
     resize() {
-        Object.values(this.charts).forEach(chart => {
-            if (chart && chart.resize) {
-                chart.resize();
+        Object.keys(this.charts).forEach(key => {
+            const chart = this.charts[key];
+            if (!chart) return;
+            if (typeof chart.isDisposed === 'function' && chart.isDisposed()) {
+                delete this.charts[key];
+                return;
             }
+            chart.resize();
         });
     }
 
-    // 销毁图表
+    /* ---------- 销毁图表 ---------- */
+
     dispose() {
-        Object.values(this.charts).forEach(chart => {
-            if (chart && chart.dispose) {
-                chart.dispose();
-            }
-        });
+        const keys = new Set([...Object.keys(this.charts), ...Object.keys(this.observers)]);
+        keys.forEach(key => this.disposeChart(key));
         this.charts = {};
+        this.observers = {};
     }
 }
 

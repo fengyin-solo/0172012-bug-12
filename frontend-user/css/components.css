@@ -220,6 +220,27 @@
     position: relative;
 }
 
+/* 数据缺失占位 */
+.chart-empty-state {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--text-muted);
+    font-size: 14px;
+    text-align: center;
+    border: 1px dashed rgba(168, 85, 247, 0.3);
+    border-radius: var(--radius-md);
+    background: rgba(168, 85, 247, 0.04);
+}
+
+.chart-empty-icon {
+    font-size: 28px;
+    opacity: 0.8;
+}
+
 /* ========== 矩阵表格 ========== */
 .matrix-section {
     margin-bottom: 40px;
